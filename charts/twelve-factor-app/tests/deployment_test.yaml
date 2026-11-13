@@ -1,0 +1,167 @@
+# helm-unittest: renders the chart in memory and asserts on the YAML. No cluster needed.
+# Run: helm unittest charts/twelve-factor-app
+suite: deployment
+templates:
+  - deployment.yaml
+  - configmap.yaml   # included by the checksum annotation
+release:
+  name: orders
+  namespace: shop
+tests:
+  - it: leaves replicas to the HPA when autoscaling is on (default)
+    template: deployment.yaml
+    asserts:
+      - isKind:
+          of: Deployment
+      - notExists:
+          path: spec.replicas
+
+  - it: sets replicas when autoscaling is off
+    template: deployment.yaml
+    set:
+      autoscaling.enabled: false
+      replicaCount: 4
+    asserts:
+      - equal:
+          path: spec.replicas
+          value: 4
+
+  - it: never drops capacity during a rollout
+    template: deployment.yaml
+    asserts:
+      - equal:
+          path: spec.strategy.rollingUpdate.maxUnavailable
+          value: 0
+
+  - it: selects only the web pods (component label)
+    template: deployment.yaml
+    asserts:
+      - equal:
+          path: spec.selector.matchLabels
+          value:
+            app.kubernetes.io/name: twelve-factor-app
+            app.kubernetes.io/instance: orders
+            app.kubernetes.io/component: web
+
+  - it: uses the chart appVersion as the default tag
+    template: deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/stefanprodan/podinfo:6.7.1
+
+  - it: pins the image by digest when one is given
+    template: deployment.yaml
+    set:
+      image.digest: sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].image
+          value: ghcr.io/stefanprodan/podinfo@sha256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+
+  - it: tells the app which port to bind (factor VII)
+    template: deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].env
+          content:
+            name: PODINFO_PORT
+            value: "9898"
+
+  - it: loads config from the ConfigMap (factor III)
+    template: deployment.yaml
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].envFrom
+          content:
+            configMapRef:
+              name: orders-twelve-factor-app
+
+  - it: loads the ESO-managed Secret when externalSecrets is enabled
+    template: deployment.yaml
+    set:
+      externalSecrets.enabled: true
+      externalSecrets.secretStoreRef.name: aws
+      externalSecrets.data:
+        - secretKey: DATABASE_URL
+          remoteKey: prod/orders/db
+    asserts:
+      - contains:
+          path: spec.template.spec.containers[0].envFrom
+          content:
+            secretRef:
+              name: orders-twelve-factor-app-secrets
+
+  - it: adds the Reloader annotation on the Deployment when asked
+    template: deployment.yaml
+    set:
+      externalSecrets.enabled: true
+      externalSecrets.secretStoreRef.name: aws
+      externalSecrets.dataFrom:
+        - remoteKey: prod/orders/env
+      externalSecrets.reloadOnChange: true
+    asserts:
+      - equal:
+          path: metadata.annotations["secret.reloader.stakater.com/reload"]
+          value: orders-twelve-factor-app-secrets
+
+  - it: runs as non-root with a read-only root filesystem (factor VI)
+    template: deployment.yaml
+    asserts:
+      - equal:
+          path: spec.template.spec.securityContext.runAsNonRoot
+          value: true
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.readOnlyRootFilesystem
+          value: true
+      - equal:
+          path: spec.template.spec.containers[0].securityContext.capabilities.drop
+          value: [ALL]
+      - equal:
+          path: spec.template.spec.automountServiceAccountToken
+          value: false
+
+  - it: has startup, liveness and readiness probes (factor IX)
+    template: deployment.yaml
+    asserts:
+      - exists:
+          path: spec.template.spec.containers[0].startupProbe
+      - equal:
+          path: spec.template.spec.containers[0].livenessProbe.httpGet.path
+          value: /healthz
+      - equal:
+          path: spec.template.spec.containers[0].readinessProbe.httpGet.path
+          value: /readyz
+
+  - it: uses the native preStop sleep on Kubernetes >= 1.30
+    template: deployment.yaml
+    capabilities:
+      majorVersion: "1"
+      minorVersion: "31"
+    asserts:
+      - equal:
+          path: spec.template.spec.containers[0].lifecycle.preStop.sleep.seconds
+          value: 5
+
+  - it: skips the preStop sleep on older clusters (field does not exist there)
+    template: deployment.yaml
+    capabilities:
+      majorVersion: "1"
+      minorVersion: "28"
+    asserts:
+      - notExists:
+          path: spec.template.spec.containers[0].lifecycle
+
+  - it: spreads pods across zones and nodes
+    template: deployment.yaml
+    asserts:
+      - lengthEqual:
+          path: spec.template.spec.topologySpreadConstraints
+          count: 2
+
+  - it: adds a config checksum so config changes roll the pods
+    template: deployment.yaml
+    asserts:
+      - matchRegex:
+          path: spec.template.metadata.annotations["checksum/config"]
+          pattern: ^[a-f0-9]{64}$

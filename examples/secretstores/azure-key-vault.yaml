@@ -1,0 +1,14 @@
+# ClusterSecretStore for Azure Key Vault with AKS Workload Identity.
+# Grant the managed identity the "Key Vault Secrets User" role on the vault.
+apiVersion: external-secrets.io/v1
+kind: ClusterSecretStore
+metadata:
+  name: azure-key-vault
+spec:
+  provider:
+    azurekv:
+      authType: WorkloadIdentity
+      vaultUrl: https://my-team-vault.vault.azure.net
+      serviceAccountRef:
+        name: external-secrets
+        namespace: external-secrets

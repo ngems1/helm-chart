@@ -1,0 +1,76 @@
+# Used by `ct lint` (template only): every optional feature switched on at once.
+image:
+  digest: sha256:0000000000000000000000000000000000000000000000000000000000000000
+config:
+  env:
+    LOG_LEVEL: debug
+    FEATURE_X_ENABLED: true
+    WORKERS: 4
+  extraEnv:
+    - name: POD_NAME
+      valueFrom:
+        fieldRef:
+          fieldPath: metadata.name
+externalSecrets:
+  enabled: true
+  secretStoreRef:
+    name: aws-secrets-manager
+    kind: ClusterSecretStore
+  data:
+    - secretKey: DATABASE_URL
+      remoteKey: prod/orders/database
+      property: url
+    - secretKey: API_TOKEN
+      remoteKey: prod/orders/api-token
+      version: AWSCURRENT
+  dataFrom:
+    - remoteKey: prod/orders/env
+  reloadOnChange: true
+existingSecret: orders-legacy-secret
+autoscaling:
+  minReplicas: 3
+  maxReplicas: 20
+  targetMemoryUtilizationPercentage: 80
+podDisruptionBudget:
+  minAvailable: 2
+  maxUnavailable: null
+topologySpread:
+  whenUnsatisfiable: DoNotSchedule
+networkPolicy:
+  ingress:
+    fromNamespaces: [ingress-nginx]
+    allowPrometheusFromNamespace: monitoring
+  egress:
+    to:
+      - cidr: 10.0.0.0/16
+        ports: [5432]
+      - cidr: 0.0.0.0/0
+        except: [169.254.169.254/32]
+        ports: [443]
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+  hosts:
+    - host: orders.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: orders-tls
+      hosts: [orders.example.com]
+migration:
+  enabled: true
+  command: [./podinfo, --version]
+metrics:
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: monitoring-stack
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/orders-app
+podAnnotations:
+  team: payments
+priorityClassName: high-priority

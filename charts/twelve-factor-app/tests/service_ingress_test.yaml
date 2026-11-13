@@ -1,0 +1,40 @@
+suite: service, ingress, servicemonitor
+templates:
+  - service.yaml
+  - ingress.yaml
+  - servicemonitor.yaml
+release:
+  name: orders
+tests:
+  - it: exposes port 80 -> named port http
+    template: service.yaml
+    asserts:
+      - equal:
+          path: spec.ports[0]
+          value: {name: http, port: 80, targetPort: http, protocol: TCP}
+
+  - it: routes the ingress to the service
+    template: ingress.yaml
+    set:
+      ingress.enabled: true
+      ingress.className: nginx
+    asserts:
+      - equal:
+          path: spec.ingressClassName
+          value: nginx
+      - equal:
+          path: spec.rules[0].http.paths[0].backend.service.name
+          value: orders-twelve-factor-app
+
+  - it: renders a ServiceMonitor with extra labels
+    template: servicemonitor.yaml
+    set:
+      metrics.serviceMonitor.enabled: true
+      metrics.serviceMonitor.labels: {release: monitoring-stack}
+    asserts:
+      - equal:
+          path: metadata.labels.release
+          value: monitoring-stack
+      - equal:
+          path: spec.endpoints[0].path
+          value: /metrics

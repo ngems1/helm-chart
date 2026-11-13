@@ -1,0 +1,26 @@
+{{- /*
+PodDisruptionBudget: during VOLUNTARY disruptions (node drain, cluster
+upgrade), Kubernetes evicts pods only while this budget is respected.
+The chart refuses a minAvailable that would block drains forever (see _helpers.tpl).
+*/}}
+{{- if .Values.podDisruptionBudget.enabled }}
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: {{ include "twelve-factor-app.fullname" . }}
+  labels:
+    {{- include "twelve-factor-app.labels" . | nindent 4 }}
+spec:
+  {{- if not (kindIs "invalid" .Values.podDisruptionBudget.minAvailable) }}
+  minAvailable: {{ .Values.podDisruptionBudget.minAvailable }}
+  {{- else }}
+  maxUnavailable: {{ .Values.podDisruptionBudget.maxUnavailable }}
+  {{- end }}
+  {{- if semverCompare ">=1.27-0" .Capabilities.KubeVersion.Version }}
+  # Pods that are already broken may always be evicted, so they never block a drain.
+  unhealthyPodEvictionPolicy: AlwaysAllow
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "twelve-factor-app.webSelectorLabels" . | nindent 6 }}
+{{- end }}

@@ -1,0 +1,83 @@
+{{- /*
+Zero-trust networking. Once a pod is selected by a NetworkPolicy, everything
+NOT listed below is denied, in both directions. The selector deliberately uses
+only name + instance, so it also covers the migration Job pods.
+Requires a CNI that enforces NetworkPolicy (Calico, Cilium, AWS VPC CNI with
+network policy enabled, Azure NPM/Cilium, GKE Dataplane V2...).
+*/}}
+{{- if .Values.networkPolicy.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: {{ include "twelve-factor-app.fullname" . }}
+  labels:
+    {{- include "twelve-factor-app.labels" . | nindent 4 }}
+spec:
+  podSelector:
+    matchLabels:
+      {{- include "twelve-factor-app.selectorLabels" . | nindent 6 }}
+  policyTypes:
+    - Ingress
+    - Egress
+  # INBOUND: only to the http port, and only from the sources listed.
+  # An empty list here means "deny all inbound traffic".
+  ingress:
+    {{- if or .Values.networkPolicy.ingress.allowClientLabel .Values.networkPolicy.ingress.fromNamespaces }}
+    - ports:
+        - port: http
+          protocol: TCP
+      from:
+        {{- if .Values.networkPolicy.ingress.allowClientLabel }}
+        # any pod in this namespace labelled "<fullname>-client: true"
+        - podSelector:
+            matchLabels:
+              {{ include "twelve-factor-app.clientLabel" . }}: "true"
+        {{- end }}
+        {{- range .Values.networkPolicy.ingress.fromNamespaces }}
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+        {{- end }}
+    {{- end }}
+    {{- with .Values.networkPolicy.ingress.allowPrometheusFromNamespace }}
+    - ports:
+        - port: http
+          protocol: TCP
+      from:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: {{ . }}
+    {{- end }}
+  # OUTBOUND: DNS plus the destinations listed in networkPolicy.egress.to.
+  egress:
+    {{- if .Values.networkPolicy.egress.allowDns }}
+    - to:
+        - namespaceSelector:
+            matchLabels:
+              kubernetes.io/metadata.name: kube-system
+          podSelector:
+            matchLabels:
+              k8s-app: kube-dns
+      ports:
+        - port: 53
+          protocol: UDP
+        - port: 53
+          protocol: TCP
+    {{- end }}
+    {{- range .Values.networkPolicy.egress.to }}
+    - to:
+        - ipBlock:
+            cidr: {{ .cidr }}
+            {{- with .except }}
+            except:
+              {{- toYaml . | nindent 14 }}
+            {{- end }}
+      {{- with .ports }}
+      ports:
+        {{- range . }}
+        - port: {{ . }}
+          protocol: TCP
+        {{- end }}
+      {{- end }}
+    {{- end }}
+{{- end }}

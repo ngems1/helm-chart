@@ -1,0 +1,26 @@
+# Values used by scripts/e2e-kind.sh (and CI) on a local kind cluster.
+config:
+  env:
+    LOG_LEVEL: info
+    PODINFO_UI_MESSAGE: "Hello from kind"
+
+externalSecrets:
+  enabled: true
+  refreshInterval: 10s          # short so the e2e test sees rotations quickly
+  secretStoreRef:
+    name: fake-store
+    kind: ClusterSecretStore
+  data:
+    - secretKey: DATABASE_URL
+      remoteKey: local/orders/database
+  dataFrom:
+    - remoteKey: local/orders/env  # -> API_TOKEN, PAYMENT_PROVIDER
+
+autoscaling:
+  minReplicas: 2
+  maxReplicas: 4
+
+# [XII] proves the admin Job gets the same config + secrets as the app
+migration:
+  enabled: true
+  command: ["sh", "-c", "echo running migrations; test -n \"$DATABASE_URL\" && echo DATABASE_URL present"]

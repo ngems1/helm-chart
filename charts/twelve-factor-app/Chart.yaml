@@ -1,0 +1,26 @@
+apiVersion: v2
+name: twelve-factor-app
+description: >-
+  Production-ready Helm chart for a stateless 12-factor web application:
+  HPA, PodDisruptionBudget, default-deny NetworkPolicy, External Secrets
+  Operator integration, hardened pod security and a strict values schema.
+type: application
+version: 1.0.0
+# Default image: podinfo, a small 12-factor Go app (config from env, logs to
+# stdout, /healthz + /readyz, graceful shutdown).
+appVersion: "6.7.1"
+kubeVersion: ">=1.25.0-0"
+home: https://github.com/ngems1/helm-twelve-factor-app
+sources:
+  - https://github.com/ngems1/helm-twelve-factor-app
+keywords:
+  - 12-factor
+  - hpa
+  - pdb
+  - networkpolicy
+  - external-secrets
+maintainers:
+  - name: Sebastien Ngembou
+    url: https://github.com/ngems1
+annotations:
+  artifacthub.io/license: MIT

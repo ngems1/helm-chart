@@ -1,0 +1,7 @@
+# chart-testing (ct) configuration: https://github.com/helm/chart-testing
+chart-dirs:
+  - charts
+target-branch: main
+validate-maintainers: false
+check-version-increment: true   # every chart change must bump Chart.yaml `version`
+lint-conf: lintconf.yaml

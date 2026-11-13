@@ -1,0 +1,63 @@
+suite: hpa and pdb
+templates:
+  - hpa.yaml
+  - pdb.yaml
+release:
+  name: orders
+tests:
+  - it: scales the Deployment on CPU by default
+    template: hpa.yaml
+    asserts:
+      - equal:
+          path: spec.scaleTargetRef
+          value: {apiVersion: apps/v1, kind: Deployment, name: orders-twelve-factor-app}
+      - equal:
+          path: spec.minReplicas
+          value: 2
+      - equal:
+          path: spec.metrics[0].resource.name
+          value: cpu
+      - lengthEqual:
+          path: spec.metrics
+          count: 1
+
+  - it: adds a memory metric when configured
+    template: hpa.yaml
+    set:
+      autoscaling.targetMemoryUtilizationPercentage: 80
+    asserts:
+      - lengthEqual:
+          path: spec.metrics
+          count: 2
+
+  - it: renders no HPA when autoscaling is off
+    template: hpa.yaml
+    set:
+      autoscaling.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0
+
+  - it: allows one pod down at a time by default
+    template: pdb.yaml
+    asserts:
+      - isKind:
+          of: PodDisruptionBudget
+      - equal:
+          path: spec.maxUnavailable
+          value: 1
+      - notExists:
+          path: spec.minAvailable
+      - equal:
+          path: spec.selector.matchLabels["app.kubernetes.io/component"]
+          value: web
+
+  - it: accepts a percentage for minAvailable
+    template: pdb.yaml
+    set:
+      podDisruptionBudget.maxUnavailable: null
+      podDisruptionBudget.minAvailable: 50%
+    asserts:
+      - equal:
+          path: spec.minAvailable
+          value: 50%

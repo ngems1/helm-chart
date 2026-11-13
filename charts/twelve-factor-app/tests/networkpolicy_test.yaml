@@ -1,0 +1,75 @@
+suite: networkpolicy
+templates:
+  - networkpolicy.yaml
+release:
+  name: orders
+tests:
+  - it: is default-deny with ingress + egress policy types
+    asserts:
+      - equal:
+          path: spec.policyTypes
+          value: [Ingress, Egress]
+
+  - it: covers every pod of the release (web and migration)
+    asserts:
+      - equal:
+          path: spec.podSelector.matchLabels
+          value:
+            app.kubernetes.io/name: twelve-factor-app
+            app.kubernetes.io/instance: orders
+
+  - it: allows client pods in by label
+    asserts:
+      - equal:
+          path: spec.ingress[0].from[0].podSelector.matchLabels
+          value:
+            orders-twelve-factor-app-client: "true"
+
+  - it: allows DNS out to kube-dns only
+    asserts:
+      - equal:
+          path: spec.egress[0].to[0].podSelector.matchLabels["k8s-app"]
+          value: kube-dns
+      - lengthEqual:
+          path: spec.egress
+          count: 1
+
+  - it: adds ingress-controller and prometheus namespaces
+    set:
+      networkPolicy.ingress.fromNamespaces: [ingress-nginx]
+      networkPolicy.ingress.allowPrometheusFromNamespace: monitoring
+    asserts:
+      - contains:
+          path: spec.ingress[0].from
+          content:
+            namespaceSelector:
+              matchLabels:
+                kubernetes.io/metadata.name: ingress-nginx
+      - equal:
+          path: spec.ingress[1].from[0].namespaceSelector.matchLabels["kubernetes.io/metadata.name"]
+          value: monitoring
+
+  - it: adds egress CIDRs with ports and exceptions
+    set:
+      networkPolicy.egress.to:
+        - cidr: 0.0.0.0/0
+          except: [169.254.169.254/32]
+          ports: [443]
+    asserts:
+      - equal:
+          path: spec.egress[1]
+          value:
+            to:
+              - ipBlock:
+                  cidr: 0.0.0.0/0
+                  except: [169.254.169.254/32]
+            ports:
+              - port: 443
+                protocol: TCP
+
+  - it: can be disabled
+    set:
+      networkPolicy.enabled: false
+    asserts:
+      - hasDocuments:
+          count: 0

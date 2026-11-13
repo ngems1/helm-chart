@@ -1,0 +1,6 @@
+*.tgz
+charts/*/charts/
+charts/*/tests/__snapshot__/
+.idea/
+.vscode/
+*.swp

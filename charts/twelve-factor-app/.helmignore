@@ -1,0 +1,12 @@
+# Patterns to ignore when packaging the chart (helm package).
+.DS_Store
+.git/
+.gitignore
+*.swp
+*.bak
+*.tmp
+.idea/
+.vscode/
+# Unit tests and CI values are not part of the released chart
+tests/
+ci/

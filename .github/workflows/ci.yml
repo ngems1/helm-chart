@@ -1,0 +1,115 @@
+# CI for the twelve-factor-app Helm chart.
+#
+#   lint        helm lint --strict (also validates every values file against values.schema.json)
+#   unittest    helm-unittest: assertions on rendered YAML, no cluster
+#   kubeconform renders several value sets and validates them against the Kubernetes
+#               (and ExternalSecret / ServiceMonitor CRD) OpenAPI schemas
+#   ct-lint     chart-testing: yamllint, version bump check
+#   e2e         real cluster (kind) + External Secrets Operator + NetworkPolicy checks
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  HELM_VERSION: v3.19.0
+  CHART: charts/twelve-factor-app
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: helm lint (every values file)
+        run: |
+          helm lint --strict "$CHART"
+          for f in "$CHART"/ci/*.yaml examples/values-production.yaml examples/kind/values.yaml; do
+            echo "::group::$f"; helm lint --strict "$CHART" -f "$f"; echo "::endgroup::"
+          done
+      - name: schema must reject bad values
+        run: |
+          # A typo'd key and a wrong type must both FAIL. If they pass, the schema is broken.
+          ! helm lint "$CHART" --set replicaCnt=3
+          ! helm lint "$CHART" --set image.pullPolicy=Sometimes
+          ! helm lint "$CHART" --set autoscaling.minReplicas=5,autoscaling.maxReplicas=3
+
+  unittest:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: install helm-unittest
+        run: helm plugin install https://github.com/helm-unittest/helm-unittest --version v1.0.0
+      - name: helm unittest
+        run: helm unittest --color "$CHART"
+
+  kubeconform:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        kube: ["1.29.0", "1.31.0", "1.33.0"]
+    steps:
+      - uses: actions/checkout@v5
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: install kubeconform
+        run: |
+          curl -sSL https://github.com/yannh/kubeconform/releases/download/v0.7.0/kubeconform-linux-amd64.tar.gz \
+            | tar -xz -C /usr/local/bin kubeconform
+      - name: render + validate
+        run: |
+          for f in "$CHART"/ci/*.yaml examples/values-production.yaml examples/kind/values.yaml; do
+            echo "::group::$f (k8s ${{ matrix.kube }})"
+            helm template orders "$CHART" -n shop -f "$f" --kube-version "${{ matrix.kube }}" \
+              | kubeconform -strict -summary -kubernetes-version "${{ matrix.kube }}" \
+                  -schema-location default \
+                  -schema-location 'https://raw.githubusercontent.com/datreeio/CRDs-catalog/main/{{.Group}}/{{.ResourceKind}}_{{.ResourceAPIVersion}}.json'
+            echo "::endgroup::"
+          done
+
+  ct-lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0   # ct compares against the target branch
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+      - uses: helm/chart-testing-action@v2.7.0
+      - name: ct lint
+        run: ct lint --config ct.yaml --all
+
+  e2e:
+    needs: [lint, unittest, kubeconform]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: azure/setup-helm@v4
+        with:
+          version: ${{ env.HELM_VERSION }}
+      - name: create kind cluster (kindnet enforces NetworkPolicy since kind v0.24)
+        uses: helm/kind-action@v1
+        with:
+          version: v0.30.0
+          cluster_name: twelve-factor
+      - name: end-to-end checks
+        run: ./scripts/e2e-kind.sh

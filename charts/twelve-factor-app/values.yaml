@@ -1,0 +1,223 @@
+# =============================================================================
+# twelve-factor-app: default values
+#
+# Every setting is validated by values.schema.json: a typo or a wrong type
+# fails at `helm install`/`helm lint` instead of silently doing nothing.
+# The factor numbers (e.g. [III]) refer to https://12factor.net
+# =============================================================================
+
+# -- Override the chart name used in resource names.
+nameOverride: ""
+# -- Override the full resource name prefix.
+fullnameOverride: ""
+
+# [I/V] Build, release, run: deploy an IMMUTABLE image. Prefer a digest in production.
+image:
+  repository: ghcr.io/stefanprodan/podinfo
+  # -- Defaults to the chart appVersion when empty.
+  tag: ""
+  # -- If set (sha256:...), the image is pulled by digest and `tag` is ignored.
+  digest: ""
+  pullPolicy: IfNotPresent
+
+imagePullSecrets: []
+
+# -- Fixed replica count. Ignored when autoscaling.enabled=true (the HPA owns replicas).
+replicaCount: 2
+
+# [VII] Port binding: the app is self-contained and listens on a port it is told.
+containerPort: 9898
+# -- Name of the env var that tells the app which port to bind (empty = do not set).
+portEnvName: PODINFO_PORT
+
+service:
+  type: ClusterIP
+  port: 80
+
+# [III] Config: everything that differs between environments lives in env vars.
+config:
+  # -- Plain (non-secret) settings. Rendered into a ConfigMap and loaded with envFrom.
+  #    Changing them rolls the pods automatically (checksum annotation).
+  env:
+    LOG_LEVEL: info
+    PODINFO_UI_MESSAGE: "Hello from a 12-factor app"
+  # -- Extra env entries in raw Kubernetes format (e.g. fieldRef / resourceFieldRef).
+  extraEnv: []
+  #  - name: POD_NAME
+  #    valueFrom:
+  #      fieldRef:
+  #        fieldPath: metadata.name
+
+# [III/IV] Secrets & backing services: credentials come from an external secret
+# manager (AWS Secrets Manager, Azure Key Vault, GCP Secret Manager, Vault...)
+# through the External Secrets Operator. They never live in git or values files.
+externalSecrets:
+  enabled: false
+  # -- ExternalSecret API version (ESO >= 0.17 serves v1; use v1beta1 for older operators).
+  apiVersion: external-secrets.io/v1
+  # -- How often ESO re-reads the secret manager (rotation is picked up automatically).
+  refreshInterval: 1h
+  secretStoreRef:
+    # -- Name of a SecretStore / ClusterSecretStore (see examples/secretstores/).
+    name: ""
+    kind: ClusterSecretStore
+  # -- Individual keys: secretKey = env var name in the pod.
+  data: []
+  #  - secretKey: DATABASE_URL
+  #    remoteKey: prod/orders/database
+  #    property: url            # optional: field inside a JSON secret
+  # -- Whole JSON secrets expanded into env vars (one env var per JSON key).
+  dataFrom: []
+  #  - remoteKey: prod/orders/env
+  # -- Add the Stakater Reloader annotation so pods restart when the secret rotates.
+  reloadOnChange: false
+
+# -- Name of an existing Kubernetes Secret to load with envFrom (alternative to externalSecrets).
+existingSecret: ""
+
+# [IX] Disposability: fast startup, graceful shutdown.
+probes:
+  startup:
+    path: /readyz
+    periodSeconds: 2
+    failureThreshold: 30
+  liveness:
+    path: /healthz
+    periodSeconds: 10
+    failureThreshold: 3
+  readiness:
+    path: /readyz
+    periodSeconds: 5
+    failureThreshold: 3
+
+lifecycle:
+  # -- Sleep before SIGTERM so load balancers stop sending traffic first (seconds, 0 = off).
+  preStopSleepSeconds: 5
+  terminationGracePeriodSeconds: 30
+
+resources:
+  requests:
+    cpu: 100m
+    memory: 64Mi
+  limits:
+    memory: 128Mi
+
+# [VIII] Concurrency: scale out with more processes, driven by load.
+autoscaling:
+  enabled: true
+  minReplicas: 2
+  maxReplicas: 10
+  # -- Target average CPU utilisation (% of requests). Null disables the CPU metric.
+  targetCPUUtilizationPercentage: 70
+  # -- Target average memory utilisation (% of requests). Null disables the memory metric.
+  targetMemoryUtilizationPercentage: null
+  behavior:
+    scaleDown:
+      # -- Wait this long before scaling down, to avoid flapping.
+      stabilizationWindowSeconds: 300
+
+# Availability during voluntary disruptions (node drains, cluster upgrades).
+podDisruptionBudget:
+  enabled: true
+  # -- Set exactly one of minAvailable / maxUnavailable.
+  minAvailable: null
+  maxUnavailable: 1
+
+# Spread replicas across zones and nodes so one failure does not take them all.
+topologySpread:
+  enabled: true
+  # -- DoNotSchedule = hard requirement, ScheduleAnyway = best effort.
+  whenUnsatisfiable: ScheduleAnyway
+
+# Zero-trust networking: deny everything, then allow only what is needed.
+networkPolicy:
+  enabled: true
+  ingress:
+    # -- Allow pods carrying the label "<release>-client: true" in this namespace.
+    allowClientLabel: true
+    # -- Allow traffic from the ingress controller's namespace (by kubernetes.io/metadata.name).
+    fromNamespaces: []
+    #  - ingress-nginx
+    # -- Allow Prometheus (namespace "monitoring") to scrape metrics.
+    allowPrometheusFromNamespace: ""
+  egress:
+    # -- Allow DNS lookups (kube-dns / CoreDNS). Almost always needed.
+    allowDns: true
+    # -- Extra egress destinations, e.g. a database or an external API.
+    to: []
+    #  - cidr: 10.0.0.0/16
+    #    ports: [5432]
+    #  - cidr: 0.0.0.0/0
+    #    except: [169.254.169.254/32]   # block the cloud metadata endpoint
+    #    ports: [443]
+
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+  hosts:
+    - host: app.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+  #  - secretName: app-tls
+  #    hosts: [app.example.com]
+
+# [XII] Admin processes: one-off tasks (DB migrations) run as a Job with the
+# SAME image and config, before each install/upgrade.
+migration:
+  enabled: false
+  command: []
+  #  - ./migrate
+  #  - up
+  backoffLimit: 1
+  activeDeadlineSeconds: 600
+
+# [XI] Logs: the app writes to stdout; the platform collects them. Nothing to configure.
+
+# Prometheus Operator ServiceMonitor (requires the CRD, e.g. kube-prometheus-stack).
+metrics:
+  serviceMonitor:
+    enabled: false
+    path: /metrics
+    interval: 30s
+    labels: {}
+
+serviceAccount:
+  create: true
+  name: ""
+  annotations: {}
+  # e.g. eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/orders-app
+  # -- Mount the Kubernetes API token only if the app calls the Kubernetes API.
+  automountToken: false
+
+# [VI] Processes: stateless, non-root, read-only filesystem.
+podSecurityContext:
+  runAsNonRoot: true
+  runAsUser: 10001
+  runAsGroup: 10001
+  fsGroup: 10001
+  seccompProfile:
+    type: RuntimeDefault
+
+securityContext:
+  allowPrivilegeEscalation: false
+  readOnlyRootFilesystem: true
+  capabilities:
+    drop: [ALL]
+
+# -- Writable scratch space at /tmp (the root filesystem is read-only).
+tmpVolume:
+  enabled: true
+  sizeLimit: 64Mi
+
+podAnnotations: {}
+podLabels: {}
+nodeSelector: {}
+tolerations: []
+affinity: {}
+priorityClassName: ""
+
+# -- Allows parent charts to pass global values.
+global: {}

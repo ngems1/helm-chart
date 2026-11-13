@@ -1,0 +1,58 @@
+# Cross-field rules the JSON schema cannot express: the chart must refuse to render.
+suite: validation
+templates:
+  - deployment.yaml
+tests:
+  - it: requires a SecretStore name when externalSecrets is enabled
+    set:
+      externalSecrets.enabled: true
+      externalSecrets.data: [{secretKey: A, remoteKey: b}]
+    asserts:
+      - failedTemplate:
+          errorMessage: externalSecrets.enabled=true requires externalSecrets.secretStoreRef.name
+
+  - it: requires data or dataFrom when externalSecrets is enabled
+    set:
+      externalSecrets.enabled: true
+      externalSecrets.secretStoreRef.name: aws
+    asserts:
+      - failedTemplate:
+          errorMessage: externalSecrets.enabled=true requires at least one entry in externalSecrets.data or externalSecrets.dataFrom
+
+  - it: rejects minReplicas > maxReplicas
+    set:
+      autoscaling.minReplicas: 5
+      autoscaling.maxReplicas: 3
+    asserts:
+      - failedTemplate:
+          errorMessage: autoscaling.minReplicas must be <= autoscaling.maxReplicas
+
+  - it: rejects an HPA without metrics
+    set:
+      autoscaling.targetCPUUtilizationPercentage: null
+    asserts:
+      - failedTemplate:
+          errorMessage: autoscaling needs targetCPUUtilizationPercentage and/or targetMemoryUtilizationPercentage
+
+  - it: rejects a PDB with both minAvailable and maxUnavailable
+    set:
+      podDisruptionBudget.minAvailable: 1
+      podDisruptionBudget.maxUnavailable: 1
+    asserts:
+      - failedTemplate:
+          errorMessage: "podDisruptionBudget: set either minAvailable or maxUnavailable, not both"
+
+  - it: rejects a PDB that would block node drains forever
+    set:
+      podDisruptionBudget.minAvailable: 2
+      podDisruptionBudget.maxUnavailable: null
+    asserts:
+      - failedTemplate:
+          errorMessage: podDisruptionBudget.minAvailable (2) must be lower than the minimum replica count (2), otherwise node drains block forever
+
+  - it: rejects a migration without a command
+    set:
+      migration.enabled: true
+    asserts:
+      - failedTemplate:
+          errorMessage: migration.enabled=true requires migration.command

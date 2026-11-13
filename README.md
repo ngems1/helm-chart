@@ -191,5 +191,3 @@ ct.yaml, lintconf.yaml      chart-testing config
 ## License
 
 MIT
-#   h e l m - c h a r t  
- 

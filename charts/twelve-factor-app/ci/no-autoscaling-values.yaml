@@ -1,0 +1,16 @@
+# Fixed replica count, no HPA, everything optional off: checks the "minimal" code paths.
+replicaCount: 3
+autoscaling:
+  enabled: false
+podDisruptionBudget:
+  maxUnavailable: null
+  minAvailable: 50%
+networkPolicy:
+  enabled: false
+topologySpread:
+  enabled: false
+tmpVolume:
+  enabled: false
+portEnvName: ""
+lifecycle:
+  preStopSleepSeconds: 0

@@ -1,0 +1,2 @@
+# Used by `ct lint` / `ct install`: the chart with its defaults (HPA + PDB + NetworkPolicy on).
+{}

@@ -1,0 +1,37 @@
+{{- /*
+`helm test <release>` runs this pod. It carries the client label, so the
+NetworkPolicy lets it in: the test proves the app answers AND that the
+policy allows legitimate clients.
+*/}}
+apiVersion: v1
+kind: Pod
+metadata:
+  name: {{ printf "%s-test" (include "twelve-factor-app.fullname" .) | trunc 63 | trimSuffix "-" }}
+  labels:
+    {{ include "twelve-factor-app.clientLabel" . }}: "true"
+  annotations:
+    helm.sh/hook: test
+    helm.sh/hook-delete-policy: before-hook-creation,hook-succeeded
+spec:
+  restartPolicy: Never
+  automountServiceAccountToken: false
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 10001
+    seccompProfile:
+      type: RuntimeDefault
+  containers:
+    - name: wget
+      image: busybox:1.37
+      command:
+        - wget
+        - -q
+        - -O-
+        - -T
+        - "5"
+        - http://{{ include "twelve-factor-app.fullname" . }}:{{ .Values.service.port }}{{ .Values.probes.readiness.path }}
+      securityContext:
+        allowPrivilegeEscalation: false
+        readOnlyRootFilesystem: true
+        capabilities:
+          drop: [ALL]

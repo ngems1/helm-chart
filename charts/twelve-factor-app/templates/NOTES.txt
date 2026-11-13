@@ -1,0 +1,32 @@
+{{ include "twelve-factor-app.fullname" . }} is deployed in namespace {{ .Release.Namespace }}.
+
+Image:        {{ include "twelve-factor-app.image" . }}
+{{- if .Values.autoscaling.enabled }}
+Scaling:      HPA {{ .Values.autoscaling.minReplicas }}-{{ .Values.autoscaling.maxReplicas }} replicas
+{{- else }}
+Scaling:      {{ .Values.replicaCount }} fixed replicas
+{{- end }}
+{{- if .Values.externalSecrets.enabled }}
+Secrets:      ExternalSecret -> Secret {{ include "twelve-factor-app.externalSecretTarget" . }} (refresh {{ .Values.externalSecrets.refreshInterval }})
+              check sync: kubectl -n {{ .Release.Namespace }} get externalsecret {{ include "twelve-factor-app.fullname" . }}
+{{- end }}
+
+1. Check the rollout:
+   kubectl -n {{ .Release.Namespace }} rollout status deploy/{{ include "twelve-factor-app.fullname" . }}
+
+2. Call the app:
+{{- if .Values.ingress.enabled }}
+{{- range .Values.ingress.hosts }}
+   http{{ if $.Values.ingress.tls }}s{{ end }}://{{ .host }}
+{{- end }}
+{{- else }}
+   kubectl -n {{ .Release.Namespace }} port-forward svc/{{ include "twelve-factor-app.fullname" . }} 8080:{{ .Values.service.port }}
+   curl http://localhost:8080/
+{{- end }}
+{{- if .Values.networkPolicy.enabled }}
+
+NetworkPolicy is ON: only pods labelled "{{ include "twelve-factor-app.clientLabel" . }}=true"
+{{- with .Values.networkPolicy.ingress.fromNamespaces }} and namespaces {{ join ", " . }}{{ end }} can reach the app.
+{{- end }}
+
+3. Smoke test:  helm test {{ .Release.Name }} -n {{ .Release.Namespace }}

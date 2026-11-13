@@ -1,0 +1,86 @@
+# A realistic production override. Install with:
+#   helm upgrade --install orders charts/twelve-factor-app -n shop --create-namespace \
+#     -f examples/values-production.yaml
+image:
+  repository: ghcr.io/stefanprodan/podinfo
+  # Pin by digest: the same bytes in staging and production (factor V).
+  # digest: sha256:<64 hex chars>
+  tag: "6.7.1"
+
+config:
+  env:
+    LOG_LEVEL: warn
+    PODINFO_UI_MESSAGE: "orders service"
+
+externalSecrets:
+  enabled: true
+  refreshInterval: 15m
+  secretStoreRef:
+    name: aws-secrets-manager      # see examples/secretstores/
+    kind: ClusterSecretStore
+  data:
+    - secretKey: DATABASE_URL
+      remoteKey: prod/orders/database
+      property: url
+  dataFrom:
+    - remoteKey: prod/orders/env
+  reloadOnChange: true             # needs Stakater Reloader in the cluster
+
+resources:
+  requests:
+    cpu: 250m
+    memory: 128Mi
+  limits:
+    memory: 256Mi
+
+autoscaling:
+  minReplicas: 3
+  maxReplicas: 30
+  targetCPUUtilizationPercentage: 65
+
+podDisruptionBudget:
+  minAvailable: 2
+  maxUnavailable: null
+
+topologySpread:
+  whenUnsatisfiable: DoNotSchedule   # 3 zones: hard requirement
+
+networkPolicy:
+  ingress:
+    fromNamespaces: [ingress-nginx]
+    allowPrometheusFromNamespace: monitoring
+  egress:
+    to:
+      - cidr: 10.20.0.0/16           # RDS subnets
+        ports: [5432]
+      - cidr: 0.0.0.0/0              # third-party HTTPS APIs...
+        except: [169.254.169.254/32] # ...but never the cloud metadata endpoint
+        ports: [443]
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt
+  hosts:
+    - host: orders.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: orders-tls
+      hosts: [orders.example.com]
+
+migration:
+  enabled: true
+  command: ["./migrate", "up"]
+
+metrics:
+  serviceMonitor:
+    enabled: true
+    labels:
+      release: monitoring-stack      # must match your Prometheus serviceMonitorSelector
+
+serviceAccount:
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::123456789012:role/orders-app
